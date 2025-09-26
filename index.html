@@ -255,33 +255,65 @@
   }
 
   // ---------- Excel(G열) 로딩 ----------
-  async function loadExcelFromFile(file){
-    if(!file){ excelStatus.textContent='엑셀 선택 취소'; return; }
-    try{
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: 'array' });
-      const sheetName = wb.SheetNames[0];
-      const ws = wb.Sheets[sheetName];
+  // ---------- Excel(G열) 로딩 (시트 자동탐색 + G열 직접읽기) ----------
+async function loadExcelFromFile(file){
+  if(!file){ excelStatus.textContent='엑셀 선택 취소'; return; }
+  try{
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
 
-      const rows = XLSX.utils.sheet_to_json(ws, { header:1, raw:true, defval:'' });
+    // 1) 모든 시트를 돌면서 "G열에서 뽑힌 건수"가 가장 많은 시트를 선택
+    function readGFromSheet(ws){
+      const out = [];
+      const ref = ws['!ref'];
+      if(!ref) return out;
 
-      const list = [];
-      for(const r of rows){
-        const cell = r[6]; // G열(0-index 6)
+      const range = XLSX.utils.decode_range(ref); // {s:{r,c}, e:{r,c}}
+      // G열(0-based 6)만 순회
+      const G = 6;
+      for(let r = range.s.r; r <= range.e.r; r++){
+        const addr = XLSX.utils.encode_cell({ r, c: G }); // "G{row}"
+        const cell = ws[addr]?.v; // 원시 값
         const f8 = first8FromCell(cell);
-        if (f8) list.push(f8);
+        if(f8) out.push(f8);
       }
-
-      saveTargetValuesToStorage(list, { fileName: file.name });
-      console.log('[EXCEL] parsed count =', TARGET_VALUES.length, 'first items =', TARGET_VALUES.slice(0,10));
-    }catch(err){
-      excelStatus.textContent = '엑셀 로딩 실패';
-      console.error('엑셀 파싱 에러:', err);
-      alert('엑셀을 읽는 중 오류가 발생했습니다.');
-    }finally{
-      excelInput.value = '';
+      return out;
     }
+
+    const sheetStats = wb.SheetNames.map(name=>{
+      const ws = wb.Sheets[name];
+      const vals = readGFromSheet(ws);
+      return { name, count: vals.length, vals };
+    });
+
+    // 건수가 가장 큰 시트 선택
+    sheetStats.sort((a,b)=> b.count - a.count);
+    const best = sheetStats[0];
+    console.log('[EXCEL] 시트별 G열 건수:', sheetStats.map(s=>({name:s.name, count:s.count})));
+
+    if(!best || best.count === 0){
+      excelStatus.textContent = 'G열에서 유효한 8자리가 없습니다';
+      console.warn('[EXCEL] 모든 시트에서 G열 추출 0건');
+      // 참고로, 필요하면 첫 시트를 sheet_to_json으로 찍어보세요:
+      // const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:''});
+      // console.log('[DEBUG] 첫 시트 rows 샘플', rows.slice(0,20));
+      saveTargetValuesToStorage([], { fileName: file.name, sheet: best?.name || '(none)' });
+      return;
+    }
+
+    // 2) 최적 시트의 값 저장
+    saveTargetValuesToStorage(best.vals, { fileName: file.name, sheet: best.name });
+    console.log('[EXCEL] 선택 시트:', best.name, '건수:', best.count, '예시:', best.vals.slice(0,10));
+
+  }catch(err){
+    excelStatus.textContent = '엑셀 로딩 실패';
+    console.error('엑셀 파싱 에러:', err);
+    alert('엑셀을 읽는 중 오류가 발생했습니다.');
+  }finally{
+    excelInput.value = '';
   }
+}
+
 
   // ---------- UI 바인딩 ----------
   pickExcelBtn.addEventListener('click', ()=> excelInput.click());
