@@ -23,27 +23,18 @@
       background:var(--card); border:1px solid var(--border); border-radius:16px; overflow:hidden;
       box-shadow: 0 10px 30px rgba(0,0,0,.25);
     }
-    .preview{
-      position:relative; aspect-ratio: 9/16; width:100%; background:#000;
-    }
-    video{
-      width:100%; height:100%; object-fit:cover; display:block; background:#000;
-    }
-    .overlay{
-      position:absolute; inset:0; pointer-events:none; display:flex; align-items:center; justify-content:center;
-    }
+    .preview{ position:relative; aspect-ratio: 9/16; width:100%; background:#000; }
+    video{ width:100%; height:100%; object-fit:cover; display:block; background:#000; }
+    .overlay{ position:absolute; inset:0; pointer-events:none; display:flex; align-items:center; justify-content:center; }
     .frame{
       width:70%; aspect-ratio:1/1; border:2px dashed rgba(255,255,255,.35); border-radius:12px;
       box-shadow: inset 0 0 0 9999px rgba(0,0,0,.25);
       backdrop-filter: blur(2px);
     }
-    .controls{
-      display:flex; gap:12px; padding:12px; border-top:1px solid var(--border); flex-wrap:wrap; align-items:center; justify-content:center;
-    }
+    .controls{ display:flex; gap:12px; padding:12px; border-top:1px solid var(--border); flex-wrap:wrap; align-items:center; justify-content:center; }
     button{
       flex:1 1 auto; min-width:120px; padding:14px 16px; border-radius:12px; border:1px solid var(--border); background:#131a23;
-      color:var(--fg); font-size:16px; font-weight:600; cursor:pointer; transition:.15s ease;
-      touch-action:manipulation;
+      color:var(--fg); font-size:16px; font-weight:600; cursor:pointer; transition:.15s ease; touch-action:manipulation;
     }
     button:hover{transform:translateY(-1px)}
     .on{background: var(--accent); color:#041423; border-color:transparent}
@@ -56,12 +47,8 @@
       font-size:14px; flex:1 1 220px;
     }
     .chip{font-size:12px; color:var(--muted)}
-    .stat{
-      padding:12px; border-top:1px solid var(--border); display:flex; gap:12px; flex-wrap:wrap; justify-content:space-between; align-items:center;
-    }
-    .tag{
-      padding:6px 10px; border-radius:999px; background:#0f1722; border:1px solid var(--border); font-size:12px; color:var(--muted)
-    }
+    .stat{ padding:12px; border-top:1px solid var(--border); display:flex; gap:12px; flex-wrap:wrap; justify-content:space-between; align-items:center; }
+    .tag{ padding:6px 10px; border-radius:999px; background:#0f1722; border:1px solid var(--border); font-size:12px; color:var(--muted) }
 
     /* 커스텀 알림(모달) */
     .modal-backdrop{
@@ -85,7 +72,6 @@
     .auto-close-hint{font-size:12px; color:var(--muted); text-align:right}
     .hidden{display:none}
 
-    /* 모바일 최적화 */
     @media (max-width:480px){
       header h1{font-size:16px}
       button{font-size:15px; padding:12px 14px}
@@ -143,14 +129,15 @@
     </div>
   </div>
 
+  <!-- jsQR (폴백) -->
+  <script src="https://unpkg.com/jsqr/dist/jsQR.js"></script>
+
   <script>
   // ===================== 사용자 편집 영역 =====================
-  // 배열: 여기 값들을 원하는 값으로 바꾸세요(문자열 8자리 권장).
   const TARGET_VALUES = [
     "12345678", "87654321", "00000000", "11112222",
     // ... 필요 값 추가
   ];
-  // 스캔 시 중복 알림 방지 대기(ms)
   const DEBOUNCE_MS = 1200;
   // =========================================================
 
@@ -174,8 +161,10 @@
   let scanLoopId = null;
   let lastShown = { value: null, time: 0 };
   let autoCloseTimer = null;
-  let barcodeDetectorSupported = ('BarcodeDetector' in window);
   let trackForTorch = null;
+
+  const barcodeDetectorSupported = ('BarcodeDetector' in window);
+  const detector = barcodeDetectorSupported ? new BarcodeDetector({ formats: ['qr_code'] }) : null;
 
   async function listCameras(){
     try{
@@ -194,52 +183,41 @@
   }
 
   function getPreferredConstraints(){
-    // 모바일: 후면 카메라
     if(isMobile){
-      return { video: { facingMode: { ideal: 'environment' } , width:{ideal:1280}, height:{ideal:720} , focusMode: 'continuous'} , audio:false };
+      return { video: { facingMode: { ideal: 'environment' }, width:{ideal:1280}, height:{ideal:720}, focusMode:'continuous' }, audio:false };
     }
-    // PC: 0번 캠(첫 번째 videoinput)
     const selected = deviceSelect.value;
     if(selected){
       return { video: { deviceId: { exact: selected }, width:{ideal:1280}, height:{ideal:720} }, audio:false };
     }
-    // 아직 enumerate 전이면 우선 기본
     return { video: { width:{ideal:1280}, height:{ideal:720} }, audio:false };
   }
 
   async function startCamera(){
     if(stream) await stopCamera();
     try{
-      // 먼저 카메라 목록
       await listCameras();
 
-      // PC에서 명시적으로 첫 번째 카메라를 고르도록 시도
+      // PC: 첫 번째 카메라 우선
       if(!isMobile && !deviceSelect.value){
         const devices = await navigator.mediaDevices.enumerateDevices();
         const cams = devices.filter(d=>d.kind==='videoinput');
-        if(cams.length>0){
-          deviceSelect.value = cams[0].deviceId; // 0번 캠
-        }
+        if(cams.length>0) deviceSelect.value = cams[0].deviceId;
       }
 
       stream = await navigator.mediaDevices.getUserMedia( getPreferredConstraints() );
       video.srcObject = stream;
       await video.play();
 
-      // 토치(플래시) 지원 여부
+      // 토치 가능 여부
       trackForTorch = stream.getVideoTracks()[0] || null;
       const cap = trackForTorch?.getCapabilities?.() || {};
-      if(cap.torch){
-        flashBtn.disabled = false;
-      }else{
-        flashBtn.disabled = true;
-      }
+      flashBtn.disabled = !cap.torch;
 
       scanning = true;
       toggleBtn.textContent = '카메라 끄기';
       toggleBtn.classList.remove('off'); toggleBtn.classList.add('on');
 
-      // 스캔 루프 시작
       runScanLoop();
     }catch(err){
       alert('카메라를 시작할 수 없습니다.\n권한을 허용했는지, 다른 앱이 카메라를 사용 중인지 확인해주세요.\n\n' + err);
@@ -259,13 +237,8 @@
     toggleBtn.classList.remove('on'); toggleBtn.classList.add('off');
   }
 
-  toggleBtn.addEventListener('click', ()=>{
-    if(scanning) stopCamera(); else startCamera();
-  });
-  deviceSelect.addEventListener('change', ()=>{
-    // 선택 바꾸면 재시작
-    if(scanning) startCamera();
-  });
+  toggleBtn.addEventListener('click', ()=>{ if(scanning) stopCamera(); else startCamera(); });
+  deviceSelect.addEventListener('change', ()=>{ if(scanning) startCamera(); });
 
   // 토치 토글(일부 기기만 지원)
   let torchOn = false;
@@ -277,47 +250,66 @@
     try{
       await trackForTorch.applyConstraints({ advanced: [{ torch: torchOn }] });
       flashBtn.textContent = torchOn ? '플래시 끄기' : '플래시 켜기';
-    }catch(e){
-      console.warn('Torch error', e);
-    }
+    }catch(e){ console.warn('Torch error', e); }
   });
 
-  // 스캔 구현 (BarcodeDetector 우선)
+  // 캔버스 (공용)
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  const detector = barcodeDetectorSupported ? new BarcodeDetector({ formats: ['qr_code'] }) : null;
 
   async function runScanLoop(){
     const step = async ()=>{
       if(!scanning || video.readyState < 2){ scanLoopId = requestAnimationFrame(step); return; }
 
       try{
-        // 캔버스에 현재 프레임 그리기
         const vw = video.videoWidth, vh = video.videoHeight;
         canvas.width = vw; canvas.height = vh;
         ctx.drawImage(video, 0, 0, vw, vh);
 
+        let raw = null;
+
+        // 1) BarcodeDetector 우선
         if(detector){
-          const bitmap = await createImageBitmap(canvas);
-          const codes = await detector.detect(bitmap);
-          bitmap.close?.();
-          if(codes && codes.length){
-            handleCode(codes[0].rawValue ?? codes[0].rawValue || codes[0].rawValue /* 안전 */);
+          try{
+            // createImageBitmap 없이도 detect가 되는 브라우저가 많아 직접 비트맵 생성은 생략
+            // 일부 구현체는 ImageBitmap 필요할 수 있어 실패 시 jsQR로 폴백
+            const imageBitmap = await createImageBitmap(canvas);
+            const codes = await detector.detect(imageBitmap);
+            imageBitmap.close?.();
+            if(codes && codes.length){
+              raw = codes[0].rawValue || '';
+            }
+          }catch(e){
+            // detector 오류 시 jsQR로 폴백
           }
-        }else{
-          // 미지원 브라우저 안내
-          // (필요 시 jsQR 같은 라이브러리를 추가할 수 있습니다)
-          // 1초에 한 번만 알림
-          const now = performance.now();
-          if(now - lastShown.time > 1000 && !backdrop.style.display){
-            showModal('이 브라우저는 QR 스캔을 지원하지 않습니다.', '', false, true);
+        }
+
+        // 2) jsQR 폴백
+        if(!raw){
+          if(typeof jsQR !== 'function'){
+            // jsQR 로딩 실패 안내(1초에 한 번 정도)
+            const now = performance.now();
+            if(now - lastShown.time > 1000 && backdrop.style.display !== 'flex'){
+              showModal('jsQR가 로딩되지 않았습니다. 네트워크/차단 확인 필요.', '', false, true);
+              lastShown.time = now;
+            }
+          }else{
+            const imageData = ctx.getImageData(0, 0, vw, vh);
+            const result = jsQR(imageData.data, vw, vh, { inversionAttempts: 'dontInvert' });
+            if(result && result.data){
+              raw = result.data;
+            }
           }
+        }
+
+        if(raw){
+          handleCode(raw);
         }
       }catch(e){
         console.warn('detect error', e);
       }
 
-      // 너무 과도한 호출을 피하기 위해 약간 쉬기
+      // 과도한 호출 방지
       await new Promise(r=>setTimeout(r, 150));
       scanLoopId = requestAnimationFrame(step);
     };
@@ -331,14 +323,12 @@
 
   function handleCode(raw){
     const now = performance.now();
-    // 동일 값 연속 표시 방지
     if(lastShown.value === raw && (now - lastShown.time) < DEBOUNCE_MS) return;
 
     const first8 = extractFirst8Digits(raw);
     lastRawEl.textContent = '마지막 원본: ' + (raw || '-');
     lastTrimEl.textContent = '앞 8자리: ' + (first8 || '-');
 
-    // 8자리 미만인 경우도 알림
     const exists = first8 && TARGET_VALUES.includes(first8);
     showModal(raw, first8, exists);
     lastShown = { value: raw, time: now };
@@ -358,7 +348,6 @@
 
     backdrop.style.display = 'flex';
 
-    // 자동 닫힘(2초 동안 아무런 클릭이 없어도 닫기)
     clearTimeout(autoCloseTimer);
     autoHint.textContent = '2초 후 자동 닫힘';
     let start = Date.now();
@@ -369,9 +358,6 @@
       autoCloseTimer = setTimeout(tick, 200);
     };
     autoCloseTimer = setTimeout(tick, 200);
-
-    // 사용자가 클릭하면 "무활동"이 아니므로 타이머를 그대로 두되, 다시 2초로 리셋하지는 않음
-    // (요구사항: 2초 동안 아무런 클릭이 없어도 닫히도록)
   }
 
   function closeModal(){
@@ -380,24 +366,16 @@
   }
 
   closeModalBtn.addEventListener('click', closeModal);
-  backdrop.addEventListener('click', (e)=>{
-    if(e.target === backdrop) closeModal();
-  });
+  backdrop.addEventListener('click', (e)=>{ if(e.target === backdrop) closeModal(); });
 
-  // 초기 상태에서 권한 안내 및 기기 목록 시도
+  // 초기 점검
   if(!('mediaDevices' in navigator) || !('getUserMedia' in navigator.mediaDevices)){
     alert('이 브라우저는 카메라 사용을 지원하지 않습니다.');
   }else{
-    // iOS 등에서는 사용자 제스처 후에만 play가 가능하므로 자동 시작은 하지 않음
     listCameras();
   }
 
-  // 페이지 숨김 시 카메라 정지(배터리/프라이버시)
-  document.addEventListener('visibilitychange', ()=>{
-    if(document.hidden){ if(scanning) stopCamera(); }
-  });
-
-  // iOS에서 화면 껌 현상 방지(playsinline 사용, muted 설정됨)
+  document.addEventListener('visibilitychange', ()=>{ if(document.hidden){ if(scanning) stopCamera(); }});
   </script>
 </body>
 </html>
