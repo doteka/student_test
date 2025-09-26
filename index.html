@@ -28,16 +28,20 @@
     .stat{padding:12px; border-top:1px solid var(--border); display:flex; gap:12px; flex-wrap:wrap; justify-content:space-between; align-items:center;}
     .tag{padding:6px 10px; border-radius:999px; background:#0f1722; border:1px solid var(--border); font-size:12px; color:var(--muted)}
     .modal-backdrop{position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; z-index:1000;}
-    .modal{width:min(500px,90vw); background:var(--card); border:1px solid var(--border); border-radius:16px; padding:16px; box-shadow:0 20px 60px rgba(0,0,0,.5); animation:pop .15s ease-out;}
+    .modal{width:min(500px,90vw); background:var(--card); border:1px solid var(--border); border-radius:16px; padding:24px 20px; box-shadow:0 20px 60px rgba(0,0,0,.5); animation:pop .15s ease-out; text-align:center;}
     @keyframes pop{from{transform:scale(.96); opacity:0} to{transform:scale(1); opacity:1}}
-    .modal h3{margin:0 0 6px; font-size:18px} .modal p{margin:8px 0; color:var(--muted)}
+    .modal h3{margin:0 0 6px; font-size:18px}
     .kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:#0e1420; border:1px solid var(--border); border-radius:8px; padding:4px 8px;}
-    .result{margin-top:8px; padding:10px 12px; border-radius:12px; border:1px solid var(--border); background:#0e1420; display:flex; gap:8px; align-items:center; justify-content:space-between;}
     .yes{color:var(--ok)} .no{color:var(--danger)}
     .modal .actions{display:flex; gap:10px; margin-top:14px} .modal .actions button{flex:1 1 auto}
     .auto-close-hint{font-size:12px; color:var(--muted); text-align:right}
     .hidden{display:none}
-    @media (max-width:480px){header h1{font-size:16px} button{font-size:15px; padding:12px 14px}}
+    /* 새 모달 디자인 */
+    .student-id{font-size:22px; font-weight:800; margin:10px 0 14px; color:var(--accent);}
+    .student-id .kbd{font-size:24px; padding:6px 10px;}
+    .pay-status{font-size:32px; font-weight:900; margin:10px 0 6px;}
+    .pay-emoji{font-size:40px; line-height:1; margin-top:2px;}
+    @media (max-width:480px){header h1{font-size:16px} button{font-size:15px; padding:12px 14px} .pay-status{font-size:28px}}
   </style>
 </head>
 <body>
@@ -79,15 +83,18 @@
     </section>
   </main>
 
-  <!-- 모달 -->
+  <!-- 새 모달: 원본 데이터(문자열) 표시는 제거, 학번+납부여부만 큼직하게 -->
   <div id="backdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modal">
-      <h3 id="modalTitle">스캔 결과</h3>
-      <p id="modalRaw">원본 값: <span class="kbd">-</span></p>
-      <div class="result">
-        <div>앞 8자리: <span id="modalFirst8" class="kbd">-</span></div>
-        <strong id="modalState" class="no">없다</strong>
+      <h3 id="modalTitle">확인 결과</h3>
+
+      <div class="student-id">
+        학번 🎓 <span id="modalFirst8" class="kbd">-</span>
       </div>
+
+      <div class="pay-emoji" id="modalEmoji" aria-hidden="true">❌</div>
+      <div class="pay-status no" id="modalState">미납부</div>
+
       <div class="actions"><button id="closeModal" type="button">닫기</button></div>
       <div class="auto-close-hint" id="autoHint">2초 후 자동 닫힘</div>
     </div>
@@ -119,9 +126,9 @@
   const diag = document.getElementById('diag');
 
   const backdrop = document.getElementById('backdrop');
-  const modalRaw = document.querySelector('#modalRaw .kbd');
   const modalFirst8 = document.getElementById('modalFirst8');
   const modalState = document.getElementById('modalState');
+  const modalEmoji = document.getElementById('modalEmoji');
   const closeModalBtn = document.getElementById('closeModal');
   const autoHint = document.getElementById('autoHint');
 
@@ -254,66 +261,61 @@
     }catch(e){ console.error(e); alert('사이트 데이터 삭제 중 오류가 발생했습니다.'); }
   }
 
-  // ---------- Excel(G열) 로딩 ----------
   // ---------- Excel(G열) 로딩 (시트 자동탐색 + G열 직접읽기) ----------
-async function loadExcelFromFile(file){
-  if(!file){ excelStatus.textContent='엑셀 선택 취소'; return; }
-  try{
-    const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf, { type: 'array' });
+  async function loadExcelFromFile(file){
+    if(!file){ excelStatus.textContent='엑셀 선택 취소'; return; }
+    try{
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
 
-    // 1) 모든 시트를 돌면서 "G열에서 뽑힌 건수"가 가장 많은 시트를 선택
-    function readGFromSheet(ws){
-      const out = [];
-      const ref = ws['!ref'];
-      if(!ref) return out;
+      // 1) 모든 시트를 돌면서 "G열에서 뽑힌 건수"가 가장 많은 시트를 선택
+      function readGFromSheet(ws){
+        const out = [];
+        const ref = ws['!ref'];
+        if(!ref) return out;
 
-      const range = XLSX.utils.decode_range(ref); // {s:{r,c}, e:{r,c}}
-      // G열(0-based 6)만 순회
-      const G = 6;
-      for(let r = range.s.r; r <= range.e.r; r++){
-        const addr = XLSX.utils.encode_cell({ r, c: G }); // "G{row}"
-        const cell = ws[addr]?.v; // 원시 값
-        const f8 = first8FromCell(cell);
-        if(f8) out.push(f8);
+        const range = XLSX.utils.decode_range(ref); // {s:{r,c}, e:{r,c}}
+        // G열(0-based 6)만 순회
+        const G = 6;
+        for(let r = range.s.r; r <= range.e.r; r++){
+          const addr = XLSX.utils.encode_cell({ r, c: G }); // "G{row}"
+          const cell = ws[addr]?.v; // 원시 값
+          const f8 = first8FromCell(cell);
+          if(f8) out.push(f8);
+        }
+        return out;
       }
-      return out;
+
+      const sheetStats = wb.SheetNames.map(name=>{
+        const ws = wb.Sheets[name];
+        const vals = readGFromSheet(ws);
+        return { name, count: vals.length, vals };
+      });
+
+      // 건수가 가장 큰 시트 선택
+      sheetStats.sort((a,b)=> b.count - a.count);
+      const best = sheetStats[0];
+      console.log('[EXCEL] 시트별 G열 건수:', sheetStats.map(s=>({name:s.name, count:s.count})));
+
+      if(!best || best.count === 0){
+        excelStatus.textContent = 'G열에서 유효한 8자리가 없습니다';
+        console.warn('[EXCEL] 모든 시트에서 G열 추출 0건');
+        saveTargetValuesToStorage([], { fileName: file.name, sheet: best?.name || '(none)' });
+        return;
+      }
+
+      // 2) 최적 시트의 값 저장
+      saveTargetValuesToStorage(best.vals, { fileName: file.name, sheet: best.name });
+      console.log('[EXCEL] 선택 시트:', best.name, '건수:', best.count, '예시:', best.vals.slice(0,10));
+
+    }catch(err){
+      excelStatus.textContent = '엑셀 로딩 실패';
+      console.error('엑셀 파싱 에러:', err);
+      alert('엑셀을 읽는 중 오류가 발생했습니다.');
+    }finally{
+      excelInput.value = '';
     }
-
-    const sheetStats = wb.SheetNames.map(name=>{
-      const ws = wb.Sheets[name];
-      const vals = readGFromSheet(ws);
-      return { name, count: vals.length, vals };
-    });
-
-    // 건수가 가장 큰 시트 선택
-    sheetStats.sort((a,b)=> b.count - a.count);
-    const best = sheetStats[0];
-    console.log('[EXCEL] 시트별 G열 건수:', sheetStats.map(s=>({name:s.name, count:s.count})));
-
-    if(!best || best.count === 0){
-      excelStatus.textContent = 'G열에서 유효한 8자리가 없습니다';
-      console.warn('[EXCEL] 모든 시트에서 G열 추출 0건');
-      // 참고로, 필요하면 첫 시트를 sheet_to_json으로 찍어보세요:
-      // const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, raw:true, defval:''});
-      // console.log('[DEBUG] 첫 시트 rows 샘플', rows.slice(0,20));
-      saveTargetValuesToStorage([], { fileName: file.name, sheet: best?.name || '(none)' });
-      return;
-    }
-
-    // 2) 최적 시트의 값 저장
-    saveTargetValuesToStorage(best.vals, { fileName: file.name, sheet: best.name });
-    console.log('[EXCEL] 선택 시트:', best.name, '건수:', best.count, '예시:', best.vals.slice(0,10));
-
-  }catch(err){
-    excelStatus.textContent = '엑셀 로딩 실패';
-    console.error('엑셀 파싱 에러:', err);
-    alert('엑셀을 읽는 중 오류가 발생했습니다.');
-  }finally{
-    excelInput.value = '';
   }
-}
-
 
   // ---------- UI 바인딩 ----------
   pickExcelBtn.addEventListener('click', ()=> excelInput.click());
@@ -492,16 +494,24 @@ async function loadExcelFromFile(file){
     lastShown = { value: raw, time: now };
   }
 
+  // 새 모달 로직: 학번 + 납부여부만 표시(이모지 포함)
   function showModal(raw, first8, exists, infoOnly=false){
-    modalRaw.textContent = String(raw ?? '-');
     modalFirst8.textContent = first8 ? first8 : '-';
+
     if(infoOnly){
+      modalEmoji.textContent = 'ℹ️';
       modalState.textContent = '정보';
       modalState.classList.remove('yes'); modalState.classList.add('no');
     }else{
-      modalState.textContent = exists ? '있다' : '없다';
-      modalState.classList.toggle('yes', exists);
-      modalState.classList.toggle('no', !exists);
+      if(exists){
+        modalEmoji.textContent = '✅';
+        modalState.textContent = '납부 완료';
+        modalState.classList.remove('no'); modalState.classList.add('yes');
+      }else{
+        modalEmoji.textContent = '❌';
+        modalState.textContent = '미납부';
+        modalState.classList.remove('yes'); modalState.classList.add('no');
+      }
     }
 
     backdrop.style.display = 'flex';
